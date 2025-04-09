@@ -1,0 +1,44 @@
+{
+  "articles": [
+    {
+      "source": {
+        "id": "the-times-of-india",
+        "name": "The Times of India"
+      },
+      "author": "ETtech",
+      "title": "Indian electronics firms better placed to weather tariffs storm: MeitY secretary",
+      "description": "The government is consulting with electronics manufacturers in the country on the possible impact, but the sector does not have any major concerns so far on the developing situation, MeitY secretary S Krishnan said, speaking to the press in the national capit…",
+      "url": "https://economictimes.indiatimes.com/tech/technology/indian-electronics-firms-better-placed-to-weather-tariffs-storm-meity-secretary/articleshow/120073364.cms",
+      "urlToImage": "https://img.etimg.com/thumb/msid-120073360,width-1200,height-630,imgsize-30628,overlay-ettech/articleshow.jpg",
+      "publishedAt": "2025-04-08T00:30:00Z",
+      "content": "Indias electronics industry is in a relatively advantageous position compared with competing nations in terms of the impact from the Trump administrations reciprocal tariffs, Ministry of Electronics … [+3200 chars]"
+    },
+    {
+      "source": {
+        "id": null,
+        "name": "Livemint"
+      },
+      "author": "Jatin Grover",
+      "title": "India considers replacing older SIMs as Chinese chips trigger security scare",
+      "description": "India is considering a proposal to replace older mobile phone SIMs after an investigation by the nation’s top cybersecurity agency found samples of chipsets of Chinese origin in some SIM cards",
+      "url": "https://www.livemint.com/industry/telecom/india-sims-china-chipsets-security-concerns-vodafone-idea-bharti-airtel-reliance-jio-11744017348046.html",
+      "urlToImage": "https://www.livemint.com/lm-img/img/2025/04/07/1600x900/INDIA-RELIANCE-24_1713787018722_1744030638064.jpg",
+      "publishedAt": "2025-04-07T23:50:19Z",
+      "content": "New Delhi: India is considering a proposal to replace older mobile phone SIMs after an investigation by the nations top cybersecurity agency found samples of chipsets of Chinese origin in some of the… [+4427 chars]"
+    },
+    {
+      "source": {
+        "id": "the-times-of-india",
+        "name": "The Times of India"
+      },
+      "author": "PTI",
+      "title": "Government weighing local storage of AI models to mitigate risk associated with them",
+      "description": "The government is considering local storage of AI models to curb data risks and prevent data outflow. IT Secretary S Krishnan said DPDP Act rules may be finalised in 6–8 weeks, enhancing data protection. Increased cybersecurity incident reporting reflects imp…",
+      "url": "https://economictimes.indiatimes.com/tech/artificial-intelligence/government-weighing-local-storage-of-ai-models-to-mitigate-risk-associated-with-them/articleshow/120071765.cms",
+      "urlToImage": "https://img.etimg.com/thumb/msid-120071894,width-1200,height-630,imgsize-35306,overlay-ettech/articleshow.jpg",
+      "publishedAt": "2025-04-07T17:06:29Z",
+      "content": "The government is weighing local storage of AI models to mitigate any risk associated with them and prevent flow of data outside the country, a senior government official said on Monday. While speaki… [+2001 chars]"
+    }
+  ],
+  "timestamp": 1744201326566
+}
