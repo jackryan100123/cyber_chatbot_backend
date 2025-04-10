@@ -9,14 +9,23 @@ require('dotenv').config();
 // Validate required environment variables
 const validateEnv = () => {
     const requiredEnvVars = [
-        'CHECKPHISH_API_KEY',
         'NODE_ENV'
     ];
 
-    const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    const optionalEnvVars = [
+        'CHECKPHISH_API_KEY'
+    ];
+
+    const missingRequiredEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    const missingOptionalEnvVars = optionalEnvVars.filter(envVar => !process.env[envVar]);
     
-    if (missingEnvVars.length > 0) {
-        throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    if (missingRequiredEnvVars.length > 0) {
+        throw new Error(`Missing required environment variables: ${missingRequiredEnvVars.join(', ')}`);
+    }
+
+    if (missingOptionalEnvVars.length > 0) {
+        console.warn(`Warning: Missing optional environment variables: ${missingOptionalEnvVars.join(', ')}`);
+        console.warn('Some features may be limited or unavailable.');
     }
     
     return true;
@@ -140,12 +149,19 @@ const validateUrl = (req, res, next) => {
 
 // Endpoint to scan URLs
 app.post('/api/scan-url', validateUrl, async (req, res) => {
+    if (!process.env.CHECKPHISH_API_KEY) {
+        return res.status(503).json({
+            success: false,
+            message: 'URL scanning service is currently unavailable. CHECKPHISH_API_KEY is not configured.'
+        });
+    }
+
     const { url } = req.body;
 
     try {
         // Step 1: Submit URL for scanning
         const scanResponse = await axios.post(CHECKPHISH_SCAN_URL, {
-            apiKey: CHECKPHISH_API_KEY,
+            apiKey: process.env.CHECKPHISH_API_KEY,
             urlInfo: { url },
             scanType: 'quick'
         });
@@ -155,7 +171,7 @@ app.post('/api/scan-url', validateUrl, async (req, res) => {
         }
 
         // Step 2: Poll for results
-        const scanResult = await pollForResults(scanResponse.data.jobID, CHECKPHISH_API_KEY);
+        const scanResult = await pollForResults(scanResponse.data.jobID, process.env.CHECKPHISH_API_KEY);
         
         // Format the response
         const formattedResponse = {
