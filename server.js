@@ -34,6 +34,21 @@ const validateEnv = () => {
 const app = express();
 const port = process.env.PORT || 5000;
 
+// CORS configuration for production
+const corsOptions = {
+    origin: process.env.NODE_ENV === 'production'
+        ? ['https://cyber-saathi.onrender.com', 'https://cyber-chatbot-frontend.onrender.com']
+        : ['http://localhost:5173', 'http://localhost:5174'],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    maxAge: 86400,
+    optionsSuccessStatus: 200
+};
+
+// Apply CORS before other middleware
+app.use(cors(corsOptions));
+
 // Security Middleware
 app.use(helmet({
     contentSecurityPolicy: {
@@ -42,7 +57,12 @@ app.use(helmet({
             imgSrc: ["'self'", "data:", "https:", "http:"],
             scriptSrc: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            connectSrc: ["'self'", "https://api.groq.com", "https://developers.checkphish.ai"]
+            connectSrc: ["'self'", 
+                "https://api.groq.com", 
+                "https://developers.checkphish.ai",
+                "https://cyber-saathi.onrender.com",
+                "https://cyber-chatbot-frontend.onrender.com"
+            ]
         }
     },
     crossOriginEmbedderPolicy: false
@@ -66,18 +86,6 @@ const limiter = rateLimit({
 // Apply rate limiting to all routes
 app.use(limiter);
 
-// CORS configuration for production
-const corsOptions = {
-    origin: process.env.NODE_ENV === 'production'
-        ? ['https://your-frontend-domain.com', 'https://cyber-chatbot-backend.onrender.com']
-        : ['http://localhost:5173', 'http://localhost:5174'],
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-    maxAge: 86400
-};
-
-app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' })); // Limit body size
 
 // CheckPhish API Configuration
