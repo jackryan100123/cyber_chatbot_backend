@@ -14,37 +14,42 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Security Middleware
-app.use(helmet()); // Set security HTTP headers
-app.use(compression()); // Compress all routes
+// Trust proxy in production
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
-// Rate limiting
+// Security Middleware
+app.use(helmet());
+app.use(compression());
+
+// Rate limiting with proxy support
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later'
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: 'Too many requests from this IP, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    return req.ip;
+  }
 });
 app.use('/api/', limiter);
 
-// Body parser, reading data from body into req.body
-app.use(express.json({ limit: '10kb' })); // Body limit is 10kb
-
-// Data sanitization against NoSQL query injection
+app.use(express.json({ limit: '10kb' }));
 app.use(mongoSanitize());
-
-// Data sanitization against XSS
 app.use(xss());
-
-// Prevent parameter pollution
 app.use(hpp());
 
 // CORS configuration
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://localhost:5174'],
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://cyber-chatbot-backend.onrender.com', 'http://localhost:5173', 'http://localhost:5174']
+    : ['http://localhost:5173', 'http://localhost:5174'],
   methods: ['GET'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-  maxAge: 86400 // 24 hours
+  maxAge: 86400
 };
 app.use(cors(corsOptions));
 
@@ -53,15 +58,22 @@ const GNEWS_API_KEY = process.env.GNEWS_API_KEY;
 const GNEWS_BASE_URL = 'https://gnews.io/api/v4';
 
 // Cache directory and file paths
-const CACHE_DIR = path.join(__dirname, 'cache');
+const CACHE_DIR = process.env.NODE_ENV === 'production' 
+  ? '/tmp/cache' 
+  : path.join(__dirname, 'cache');
 const CACHE_FILE = path.join(CACHE_DIR, 'news_cache.json');
 
 // Ensure cache directory exists with proper permissions
 if (!fs.existsSync(CACHE_DIR)) {
-  fs.mkdirSync(CACHE_DIR, { mode: 0o755 });
+  try {
+    fs.mkdirSync(CACHE_DIR, { mode: 0o755, recursive: true });
+    console.log(`Cache directory created at: ${CACHE_DIR}`);
+  } catch (error) {
+    console.error('Error creating cache directory:', error);
+  }
 }
 
-// Function to read cache file with error handling
+// Function to read cache file
 const readCache = () => {
   try {
     if (fs.existsSync(CACHE_FILE)) {
@@ -70,12 +82,11 @@ const readCache = () => {
     }
   } catch (error) {
     console.error('Error reading cache:', error);
-    return null;
   }
   return null;
 };
 
-// Function to write cache file with error handling
+// Function to write cache file
 const writeCache = (data) => {
   try {
     fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2), { mode: 0o644 });
@@ -86,7 +97,7 @@ const writeCache = (data) => {
   }
 };
 
-// Function to check if cache is valid (less than 24 hours old)
+// Function to check if cache is valid
 const isCacheValid = (cache) => {
   if (!cache || !cache.timestamp) return false;
   const now = Date.now();
@@ -98,6 +109,7 @@ const isCacheValid = (cache) => {
 const fetchNews = async () => {
   try {
     console.log('Fetching news from GNews API...');
+    console.log('Using API Key:', GNEWS_API_KEY ? 'Present' : 'Missing');
     
     const response = await axios.get(`${GNEWS_BASE_URL}/search`, {
       params: {
@@ -108,6 +120,9 @@ const fetchNews = async () => {
         apikey: GNEWS_API_KEY
       }
     });
+
+    console.log('GNews API Response Status:', response.status);
+    console.log('Number of articles:', response.data?.articles?.length || 0);
 
     if (response.data && response.data.articles && response.data.articles.length > 0) {
       const articles = response.data.articles.map(article => ({
@@ -124,37 +139,54 @@ const fetchNews = async () => {
         articles,
         timestamp: Date.now()
       };
-      writeCache(cacheData);
+      
+      if (writeCache(cacheData)) {
+        console.log('Successfully cached news articles');
+      } else {
+        console.error('Failed to cache news articles');
+      }
+      
       return articles;
     }
-    throw new Error('No articles found');
+    throw new Error('No articles found in response');
   } catch (error) {
     console.error('Error fetching news:', error.message);
+    if (error.response) {
+      console.error('Error response data:', error.response.data);
+      console.error('Error response status:', error.response.status);
+    }
     throw error;
   }
 };
 
-// Route to get news with enhanced security
+// Route to get news
 app.get('/api/news', async (req, res) => {
   try {
-    // Read from cache
-    const cache = readCache();
+    console.log('Received news request');
+    console.log('Request headers:', req.headers);
+    console.log('Origin:', req.headers.origin);
+    console.log('IP:', req.ip);
     
-    // Check if we have valid cached news
+    const cache = readCache();
+    console.log('Cache status:', cache ? 'Exists' : 'Does not exist');
+    
     if (isCacheValid(cache)) {
+      console.log('Returning cached news');
       return res.json(cache.articles);
     }
 
-    // Fetch new news
+    console.log('Cache invalid or empty, fetching new news');
     const articles = await fetchNews();
     
     if (articles.length === 0) {
+      console.log('No articles found');
       return res.status(404).json({ 
         status: 'error',
         message: 'No news articles found'
       });
     }
 
+    console.log('Returning new news articles');
     res.json(articles);
   } catch (error) {
     console.error('Error in news route:', error);
@@ -166,16 +198,18 @@ app.get('/api/news', async (req, res) => {
   }
 });
 
-// Health check endpoint with security headers
+// Health check endpoint
 app.get('/health', (req, res) => {
   const cache = readCache();
   res.json({ 
     status: 'ok',
+    environment: process.env.NODE_ENV || 'development',
     cache: {
       exists: !!cache,
       isValid: isCacheValid(cache),
       timestamp: cache?.timestamp,
-      articleCount: cache?.articles?.length || 0
+      articleCount: cache?.articles?.length || 0,
+      directory: CACHE_DIR
     }
   });
 });
@@ -198,11 +232,13 @@ app.use((req, res) => {
   });
 });
 
-// Start server with error handling
+// Start server
 const server = app.listen(port, () => {
   console.log(`Server running on port ${port}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Cache directory: ${CACHE_DIR}`);
+  console.log(`CORS enabled for: ${corsOptions.origin.join(', ')}`);
+  console.log(`Trust proxy: ${process.env.NODE_ENV === 'production' ? 'enabled' : 'disabled'}`);
 });
 
 // Handle unhandled promise rejections
