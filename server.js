@@ -6,6 +6,22 @@ const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 require('dotenv').config();
 
+// Validate required environment variables
+const validateEnv = () => {
+    const requiredEnvVars = [
+        'CHECKPHISH_API_KEY',
+        'NODE_ENV'
+    ];
+
+    const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+    
+    if (missingEnvVars.length > 0) {
+        throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    }
+    
+    return true;
+};
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -201,33 +217,26 @@ app.use((req, res) => {
     });
 });
 
-// Validate environment variables before starting
-try {
-    validateEnv();
-    
-    // Start server
-    const server = app.listen(port, () => {
-        console.log(`Server running in ${process.env.NODE_ENV} mode on port ${port}`);
-    });
-
-    // Graceful shutdown
-    const shutdown = () => {
-        console.log('Received kill signal, shutting down gracefully');
-        server.close(() => {
-            console.log('Closed out remaining connections');
-            process.exit(0);
+// Start server
+const startServer = async () => {
+    try {
+        validateEnv();
+        app.listen(port, '0.0.0.0', () => {
+            console.log(`Server is running on port ${port}`);
         });
+    } catch (error) {
+        console.error('Server startup error:', error);
+        process.exit(1);
+    }
+};
 
-        setTimeout(() => {
-            console.error('Could not close connections in time, forcefully shutting down');
-            process.exit(1);
-        }, 10000);
-    };
+startServer();
 
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
+// Graceful shutdown
+const shutdown = () => {
+    console.log('Shutting down gracefully...');
+    process.exit(0);
+};
 
-} catch (error) {
-    console.error('Server startup error:', error);
-    process.exit(1);
-}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
