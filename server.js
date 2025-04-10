@@ -1,277 +1,233 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
-const hpp = require('hpp');
 const compression = require('compression');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Trust proxy in production
-app.set('trust proxy', true);
-
 // Security Middleware
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:", "http:"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            connectSrc: ["'self'", "https://api.groq.com", "https://developers.checkphish.ai"]
+        }
+    },
+    crossOriginEmbedderPolicy: false
+}));
+
+// Enable compression
 app.use(compression());
 
 // Rate limiting configuration
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later',
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipFailedRequests: true,
-  handler: (req, res) => {
-    res.status(429).json({
-      status: 'error',
-      message: 'Too many requests, please try again later'
-    });
-  }
-});
-
-// Apply rate limiting to API routes
-app.use('/api/', limiter);
-
-// Rest of your middleware
-app.use(express.json({ limit: '10kb' }));
-app.use(mongoSanitize());
-app.use(xss());
-app.use(hpp());
-
-// CORS configuration
-const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://cyber-chatbot-backend.onrender.com', 'http://localhost:5173', 'http://localhost:5174']
-    : ['http://localhost:5173', 'http://localhost:5174'],
-  methods: ['GET'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  maxAge: 86400
-};
-app.use(cors(corsOptions));
-
-// Root route
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'Cyber News API is running',
-    version: '1.0.0',
-    endpoints: {
-      news: '/api/news',
-      health: '/health'
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: { 
+        status: 'error', 
+        message: 'Too many requests from this IP, please try again later' 
     },
-    documentation: 'https://github.com/jackryan100123/cyber_chatbot_backend'
-  });
+    standardHeaders: true,
+    legacyHeaders: false
 });
 
-// GNews API configuration
-const GNEWS_API_KEY = process.env.GNEWS_API_KEY;
-const GNEWS_BASE_URL = 'https://gnews.io/api/v4';
+// Apply rate limiting to all routes
+app.use(limiter);
 
-// Cache directory and file paths
-const CACHE_DIR = process.env.NODE_ENV === 'production' 
-  ? '/tmp/cache' 
-  : path.join(__dirname, 'cache');
-const CACHE_FILE = path.join(CACHE_DIR, 'news_cache.json');
-
-// Ensure cache directory exists with proper permissions
-if (!fs.existsSync(CACHE_DIR)) {
-  try {
-    fs.mkdirSync(CACHE_DIR, { mode: 0o755, recursive: true });
-    console.log(`Cache directory created at: ${CACHE_DIR}`);
-  } catch (error) {
-    console.error('Error creating cache directory:', error);
-  }
-}
-
-// Function to read cache file
-const readCache = () => {
-  try {
-    if (fs.existsSync(CACHE_FILE)) {
-      const data = fs.readFileSync(CACHE_FILE, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('Error reading cache:', error);
-  }
-  return null;
+// CORS configuration for production
+const corsOptions = {
+    origin: process.env.NODE_ENV === 'production'
+        ? ['https://your-frontend-domain.com', 'https://cyber-chatbot-backend.onrender.com']
+        : ['http://localhost:5173', 'http://localhost:5174'],
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    maxAge: 86400
 };
 
-// Function to write cache file
-const writeCache = (data) => {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2), { mode: 0o644 });
-    return true;
-  } catch (error) {
-    console.error('Error writing cache:', error);
-    return false;
-  }
-};
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10kb' })); // Limit body size
 
-// Function to check if cache is valid
-const isCacheValid = (cache) => {
-  if (!cache || !cache.timestamp) return false;
-  const now = Date.now();
-  const hours24 = 24 * 60 * 60 * 1000;
-  return now - cache.timestamp < hours24;
-};
+// CheckPhish API Configuration
+const CHECKPHISH_API_KEY = process.env.CHECKPHISH_API_KEY;
+const CHECKPHISH_SCAN_URL = 'https://developers.checkphish.ai/api/neo/scan';
+const CHECKPHISH_STATUS_URL = 'https://developers.checkphish.ai/api/neo/scan/status';
 
-// Function to fetch news from GNews
-const fetchNews = async () => {
-  try {
-    console.log('Fetching news from GNews API...');
-    console.log('Using API Key:', GNEWS_API_KEY ? 'Present' : 'Missing');
+// Function to poll for scan results
+const pollForResults = async (jobID, apiKey, maxAttempts = 10) => {
+    console.log(`Starting polling for jobID: ${jobID}`);
     
-    const response = await axios.get(`${GNEWS_BASE_URL}/search`, {
-      params: {
-        q: '(cybercrime OR cybersecurity OR "cyber attack" OR "data breach" OR "online fraud") AND (india OR indian)',
-        lang: 'en',
-        country: 'in',
-        max: 10,
-        apikey: GNEWS_API_KEY
-      }
-    });
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            console.log(`Polling attempt ${attempt + 1} of ${maxAttempts}`);
+            
+            const resultResponse = await axios.post(CHECKPHISH_STATUS_URL, {
+                apiKey: apiKey,
+                jobID: jobID,
+                insights: true
+            });
 
-    console.log('GNews API Response Status:', response.status);
-    console.log('Number of articles:', response.data?.articles?.length || 0);
+            console.log(`Poll response status: ${resultResponse.data.status}`);
+            console.log('Poll response data:', JSON.stringify(resultResponse.data, null, 2));
 
-    if (response.data && response.data.articles && response.data.articles.length > 0) {
-      const articles = response.data.articles.map(article => ({
-        title: article.title,
-        description: article.description,
-        url: article.url,
-        publishedAt: article.publishedAt,
-        source: {
-          name: article.source.name
+            if (resultResponse.data.status === 'DONE') {
+                console.log('Scan completed successfully');
+                return resultResponse.data;
+            }
+
+            // Wait for 3 seconds before next attempt (increased from 2)
+            console.log('Waiting 3 seconds before next attempt...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        } catch (error) {
+            console.error(`Polling attempt ${attempt + 1} failed:`, error.response?.data || error.message);
+            if (attempt === maxAttempts - 1) throw error;
         }
-      }));
-
-      const cacheData = {
-        articles,
-        timestamp: Date.now()
-      };
-      
-      if (writeCache(cacheData)) {
-        console.log('Successfully cached news articles');
-      } else {
-        console.error('Failed to cache news articles');
-      }
-      
-      return articles;
     }
-    throw new Error('No articles found in response');
-  } catch (error) {
-    console.error('Error fetching news:', error.message);
-    if (error.response) {
-      console.error('Error response data:', error.response.data);
-      console.error('Error response status:', error.response.status);
-    }
-    throw error;
-  }
+    throw new Error('Scan timed out after maximum polling attempts');
 };
-
-// Route to get news
-app.get('/api/news', async (req, res) => {
-  try {
-    console.log('Received news request');
-    console.log('Request headers:', req.headers);
-    console.log('Origin:', req.headers.origin);
-    console.log('IP:', req.ip);
-    
-    const cache = readCache();
-    console.log('Cache status:', cache ? 'Exists' : 'Does not exist');
-    
-    if (isCacheValid(cache)) {
-      console.log('Returning cached news');
-      return res.json(cache.articles);
-    }
-
-    console.log('Cache invalid or empty, fetching new news');
-    const articles = await fetchNews();
-    
-    if (articles.length === 0) {
-      console.log('No articles found');
-      return res.status(404).json({ 
-        status: 'error',
-        message: 'No news articles found'
-      });
-    }
-
-    console.log('Returning new news articles');
-    res.json(articles);
-  } catch (error) {
-    console.error('Error in news route:', error);
-    res.status(500).json({ 
-      status: 'error',
-      message: 'Failed to fetch news',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  const cache = readCache();
-  res.json({ 
-    status: 'ok',
-    environment: process.env.NODE_ENV || 'development',
-    cache: {
-      exists: !!cache,
-      isValid: isCacheValid(cache),
-      timestamp: cache?.timestamp,
-      articleCount: cache?.articles?.length || 0,
-      directory: CACHE_DIR
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV
+    });
+});
+
+// URL validation middleware
+const validateUrl = (req, res, next) => {
+    const { url } = req.body;
+    if (!url) {
+        return res.status(400).json({
+            success: false,
+            message: 'URL is required'
+        });
     }
-  });
+    try {
+        new URL(url); // Validate URL format
+        next();
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid URL format'
+        });
+    }
+};
+
+// Endpoint to scan URLs
+app.post('/api/scan-url', validateUrl, async (req, res) => {
+    const { url } = req.body;
+
+    try {
+        // Step 1: Submit URL for scanning
+        const scanResponse = await axios.post(CHECKPHISH_SCAN_URL, {
+            apiKey: CHECKPHISH_API_KEY,
+            urlInfo: { url },
+            scanType: 'quick'
+        });
+
+        if (!scanResponse.data?.jobID) {
+            throw new Error('Invalid scan response');
+        }
+
+        // Step 2: Poll for results
+        const scanResult = await pollForResults(scanResponse.data.jobID, CHECKPHISH_API_KEY);
+        
+        // Format the response
+        const formattedResponse = {
+            success: true,
+            result: {
+                url: scanResult.url,
+                status: scanResult.status,
+                disposition: scanResult.disposition,
+                categories: scanResult.categories,
+                scan_time: {
+                    start: scanResult.scan_start_ts,
+                    end: scanResult.scan_end_ts
+                },
+                insights_url: scanResult.insights,
+                screenshot: scanResult.screenshot_path,
+                brand: scanResult.brand
+            }
+        };
+
+        return res.json(formattedResponse);
+
+    } catch (error) {
+        console.error('Error in URL scan:', error);
+        const statusCode = error.response?.status || 500;
+        return res.status(statusCode).json({
+            success: false,
+            message: error.response?.data?.message || error.message || 'Error scanning URL',
+            error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
+// Add this after your CORS configuration
+app.post('/api/test', (req, res) => {
+    console.log('Test endpoint hit');
+    console.log('Request body:', req.body);
+    res.json({
+        success: true,
+        message: 'Test endpoint working',
+        receivedData: req.body
+    });
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    status: 'error',
-    message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
+    console.error('Unhandled error:', err);
+    res.status(500).json({
+        status: 'error',
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    status: 'error',
-    message: 'Route not found'
-  });
+    res.status(404).json({
+        status: 'error',
+        message: 'Route not found'
+    });
 });
 
-// Start server
-const server = app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Cache directory: ${CACHE_DIR}`);
-  console.log(`CORS enabled for: ${corsOptions.origin.join(', ')}`);
-  console.log(`Trust proxy: ${app.get('trust proxy')}`);
-});
+// Validate environment variables before starting
+try {
+    validateEnv();
+    
+    // Start server
+    const server = app.listen(port, () => {
+        console.log(`Server running in ${process.env.NODE_ENV} mode on port ${port}`);
+    });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('UNHANDLED REJECTION! 💥 Shutting down...');
-  console.error(err);
-  server.close(() => {
+    // Graceful shutdown
+    const shutdown = () => {
+        console.log('Received kill signal, shutting down gracefully');
+        server.close(() => {
+            console.log('Closed out remaining connections');
+            process.exit(0);
+        });
+
+        setTimeout(() => {
+            console.error('Could not close connections in time, forcefully shutting down');
+            process.exit(1);
+        }, 10000);
+    };
+
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+
+} catch (error) {
+    console.error('Server startup error:', error);
     process.exit(1);
-  });
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
-  console.error(err);
-  process.exit(1);
-}); 
+}
