@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const NewsAPI = require('newsapi');
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const helmet = require('helmet');
@@ -48,17 +48,9 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Initialize NewsAPI with error handling
-let newsapi;
-try {
-  if (!process.env.NEWS_API_KEY) {
-    throw new Error('NEWS_API_KEY is not defined in environment variables');
-  }
-  newsapi = new NewsAPI(process.env.NEWS_API_KEY);
-} catch (error) {
-  console.error('Failed to initialize NewsAPI:', error.message);
-  process.exit(1);
-}
+// GNews API configuration
+const GNEWS_API_KEY = process.env.GNEWS_API_KEY;
+const GNEWS_BASE_URL = 'https://gnews.io/api/v4';
 
 // Cache directory and file paths
 const CACHE_DIR = path.join(__dirname, 'cache');
@@ -102,30 +94,42 @@ const isCacheValid = (cache) => {
   return now - cache.timestamp < hours24;
 };
 
-// Function to fetch news with enhanced error handling
+// Function to fetch news from GNews
 const fetchNews = async () => {
   try {
-    console.log('Fetching news from NewsAPI...');
+    console.log('Fetching news from GNews API...');
     
-    const response = await newsapi.v2.everything({
-      q: '(cybercrime OR cybersecurity OR "cyber attack" OR "data breach" OR "online fraud") AND (india OR indian)',
-      language: 'en',
-      sortBy: 'publishedAt',
-      pageSize: 3,
-      domains: 'thehindu.com,indiatimes.com,indianexpress.com,timesofindia.indiatimes.com,financialexpress.com,livemint.com,business-standard.com,deccanherald.com,hindustantimes.com'
+    const response = await axios.get(`${GNEWS_BASE_URL}/search`, {
+      params: {
+        q: '(cybercrime OR cybersecurity OR "cyber attack" OR "data breach" OR "online fraud") AND (india OR indian)',
+        lang: 'en',
+        country: 'in',
+        max: 10,
+        apikey: GNEWS_API_KEY
+      }
     });
 
-    if (response.status === 'ok' && response.articles && response.articles.length > 0) {
+    if (response.data && response.data.articles && response.data.articles.length > 0) {
+      const articles = response.data.articles.map(article => ({
+        title: article.title,
+        description: article.description,
+        url: article.url,
+        publishedAt: article.publishedAt,
+        source: {
+          name: article.source.name
+        }
+      }));
+
       const cacheData = {
-        articles: response.articles,
+        articles,
         timestamp: Date.now()
       };
       writeCache(cacheData);
-      return response.articles;
+      return articles;
     }
-    throw new Error('NewsAPI returned non-ok status or no articles');
+    throw new Error('No articles found');
   } catch (error) {
-    console.error('Error fetching news:', error);
+    console.error('Error fetching news:', error.message);
     throw error;
   }
 };
